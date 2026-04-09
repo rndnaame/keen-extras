@@ -39,3 +39,4 @@ ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenextras
 
 print_message "Установка завершена! Запуск: keenextras" "\033[1;32m"
 exec $OPT_DIR/$SCRIPT
+
