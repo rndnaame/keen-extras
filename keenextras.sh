@@ -9,7 +9,7 @@ NC='\033[0m'
 REPO="keen-extras"
 SCRIPT="keenextras.sh"
 BRANCH="main"
-SCRIPT_VERSION="1.1"   # ← обновил версию
+SCRIPT_VERSION="1.2"
 
 print_message() {
   local message="$1"
@@ -21,30 +21,27 @@ print_message() {
 # ====================== AWG MANAGER ======================
 
 install_awg_last() {
-  print_message "Установка AWG Manager (последняя версия через официальный скрипт)..." "$GREEN"
+  print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
 }
 
 install_awg_version() {
-  print_message "Выбор версии AWG Manager для установки..." "$CYAN"
+  print_message "Установка выбранной версии AWG Manager..." "$CYAN"
   
-  # Устанавливаем необходимые пакеты
   opkg install curl ca-certificates wget-ssl 2>/dev/null || true
   
-  # Определение архитектуры
   A=$(opkg print-architecture 2>/dev/null | sort -k3 -nr | awk '$2!="all"{print $2;exit}')
   case $A in
     aarch64*) S="aarch64-3.10-kn"; R="aarch64-k3.10" ;;
     mipsel*)  S="mipsel-3.4-kn";  R="mipsel-k3.4" ;;
     mips*)    S="mips-3.4-kn";    R="mips-k3.4" ;;
-    *) echo "❌ Неизвестная архитектура: $A"; return 1 ;;
+    *) print_message "❌ Неизвестная архитектура: $A" "$RED"; return 1 ;;
   esac
   
   echo "✅ Архитектура: $A"
   
-  # Получаем последнюю версию
   V=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p'); V=${V#v}
-  [ -z "$V" ] && { print_message "❌ Не удалось получить последнюю версию" "$RED"; return 1; }
+  [ -z "$V" ] && { print_message "❌ Не удалось получить версию" "$RED"; return 1; }
   echo "✅ Последняя версия: $V"
   
   printf "Введите версию (Enter = $V): "; read -r ver
@@ -64,7 +61,7 @@ install_awg_version() {
     print_message "⚠️ Ошибка установки" "$RED"
   
   rm -f "awg-manager_${ver}_${S}.ipk" 2>/dev/null
-  echo "Для обновления в будущем: opkg update && opkg upgrade awg-manager"
+  echo "Обновление в будущем: opkg update && opkg upgrade awg-manager"
 }
 
 remove_awg() {
@@ -93,18 +90,16 @@ install_nfqws2() {
 }
 
 install_nfqws_web() {
-  print_message "Установка Веб-интерфейса NFQWS..." "$GREEN"
-  
-  # Фикс подвисания (обязательные зависимости)
+  print_message "Установка веб-интерфейса NFQWS..." "$GREEN"
   opkg install ca-certificates wget-ssl 2>/dev/null || true
   opkg remove wget-nossl 2>/dev/null || true
   
   mkdir -p /opt/etc/opkg
-  echo " src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf
+  echo "src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf
   opkg update >/dev/null 2>&1
   opkg install nfqws-keenetic-web && \
-    print_message "🎉 Веб-интерфейс NFQWS установлен!" "$GREEN" || \
-    print_message "⚠️ Ошибка установки веб-интерфейса" "$RED"
+    print_message "🎉 Веб-интерфейс NFQWS успешно установлен!" "$GREEN" || \
+    print_message "⚠️ Ошибка установки" "$RED"
 }
 
 remove_nfqws() {
@@ -114,23 +109,42 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
-# ====================== BACKUP ======================
+# ====================== БЭКАП ENTWARE (как в KeenKit) ======================
 
 backup_entware() {
+  print_message "Бэкап Entware" "$CYAN"
+  packages_checker tar
+  
   local DATE=$(date +%Y-%m-%d_%H-%M)
   local BACKUP_FILE="/tmp/entware_backup_${DATE}.tar.gz"
   
-  print_message "Создаём бэкап Entware..." "$GREEN"
+  print_message "Создаём резервную копию Entware..." "$GREEN"
   
-  if tar -czf "$BACKUP_FILE" /opt/ --exclude="/opt/tmp" --exclude="/opt/var/run" 2>/dev/null; then
-    print_message "Бэкап успешно создан:\n$BACKUP_FILE" "$GREEN"
-    echo "Размер: $(du -h "$BACKUP_FILE" | cut -f1)"
+  if tar -czf "$BACKUP_FILE" -C /opt . --exclude="tmp" --exclude="var/run" 2>/dev/null; then
+    print_message "✅ Бэкап успешно создан: $BACKUP_FILE" "$GREEN"
+    echo "Размер: $(du -h "$BACKUP_FILE" | awk '{print $1}')"
   else
-    print_message "Ошибка создания бэкапа!" "$RED"
+    print_message "❌ Ошибка при создании бэкапа!" "$RED"
   fi
 }
 
+# ====================== СЛУЖЕБНЫЕ ======================
+
 cleanup() { echo -e "\n${NC}Выход...${NC}"; }
+
+packages_checker() {
+  local missing=""
+  for pkg in "$@"; do
+    if ! opkg list-installed | grep -q "^$pkg"; then
+      missing="$missing $pkg"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    print_message "Устанавливаем пакеты:$missing" "\033[1;33m"
+    opkg update >/dev/null 2>&1
+    opkg install $missing
+  fi
+}
 
 # ====================== МЕНЮ ======================
 
@@ -138,16 +152,17 @@ awg_menu() {
   while true; do
     printf "\033c"
     printf "${CYAN}=== AWG Manager ===${NC}\n\n"
-    echo "1.1  Установка AWG Manager (Last Release)"
-    echo "1.2  Выбор версии для установки"
-    echo "1.3  Удаление AWG Manager"
-    echo "0.   Назад"
+    echo "1. Установить последнюю версию AWG Manager"
+    echo "2. Установить выбранную версию AWG Manager"
+    echo "3. Удалить AWG Manager"
+    echo ""
+    echo "0. Назад в главное меню"
     echo ""
     read -r -p "Выберите действие: " choice
     case "$choice" in
-      1.1|1) install_awg_last ;;
-      1.2|2) install_awg_version ;;
-      1.3|3) remove_awg ;;
+      1) install_awg_last ;;
+      2) install_awg_version ;;
+      3) remove_awg ;;
       0|00) return ;;
       *) echo "Неверный выбор" ;;
     esac
@@ -159,18 +174,19 @@ nfqws_menu() {
   while true; do
     printf "\033c"
     printf "${CYAN}=== NFQWS ===${NC}\n\n"
-    echo "2.1  Установка NFQWS"
-    echo "2.2  Установка NFQWS2"
-    echo "2.3  Установка Веб-интерфейса NFQWS"
-    echo "2.4  Удаление NFQWS (все компоненты)"
-    echo "0.   Назад"
+    echo "1. Установить NFQWS"
+    echo "2. Установить NFQWS2"
+    echo "3. Установить веб-интерфейс NFQWS"
+    echo "4. Удалить NFQWS (все компоненты)"
+    echo ""
+    echo "0. Назад в главное меню"
     echo ""
     read -r -p "Выберите действие: " choice
     case "$choice" in
-      2.1|1) install_nfqws ;;
-      2.2|2) install_nfqws2 ;;
-      2.3|3) install_nfqws_web ;;
-      2.4|4) remove_nfqws ;;
+      1) install_nfqws ;;
+      2) install_nfqws2 ;;
+      3) install_nfqws_web ;;
+      4) remove_nfqws ;;
       0|00) return ;;
       *) echo "Неверный выбор" ;;
     esac
@@ -190,7 +206,7 @@ EOF
   printf "${CYAN}KeenExtras v${SCRIPT_VERSION}${NC}\n\n"
   echo "1. AWG Manager"
   echo "2. NFQWS"
-  echo "3. Backup Entware"
+  echo "3. Бэкап Entware"
   echo ""
   echo "00. Выход"
 }
@@ -206,6 +222,7 @@ main_menu() {
       00|0) exit 0 ;;
       *) echo "Неверный выбор. Попробуйте снова." ;;
     esac
+    # Press Enter показывается ТОЛЬКО после действий (не после возврата)
     echo ""; read -r -p "Нажмите Enter для продолжения..."
   done
 }
