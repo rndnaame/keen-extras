@@ -33,7 +33,7 @@ print_logo() {
 EOF
 }
 
-# ====================== ФУНКЦИИ ИЗ ОРИГИНАЛЬНОГО KEENKIT ======================
+# ====================== ФУНКЦИИ ИНФОРМАЦИИ (ТОЧНО КАК В KEENKIT) ======================
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch
@@ -95,7 +95,7 @@ get_modem() { :; }
 get_mws_members() { :; }
 check_update() { :; }
 
-# ====================== BACKUP ENTWARE (полностью как в KeenKit) ======================
+# ====================== BACKUP ENTWARE ======================
 get_internal_storage_size() {
   local ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
   local free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
@@ -225,7 +225,7 @@ backup_entware() {
   exit_function
 }
 
-# ====================== AWG MANAGER ======================
+# ====================== AWG + NFQWS + UPDATE ======================
 install_awg_last() { 
   print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
@@ -255,7 +255,6 @@ remove_awg() {
   print_message "AWG Manager полностью удалён" "$GREEN"
 }
 
-# ====================== NFQWS ======================
 install_nfqws() { 
   print_message "Установка NFQWS..." "$GREEN"
   mkdir -p /opt/etc/opkg
@@ -289,7 +288,6 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
-# ====================== ОБНОВЛЕНИЕ ======================
 update_menu() {
   print_message "Обновление KeenExtras..." "$CYAN"
   curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { print_message "❌ Не удалось скачать обновление" "$RED"; return 1; }
