@@ -9,13 +9,7 @@ NC='\033[0m'
 REPO="keen-extras"
 SCRIPT="keenextras.sh"
 BRANCH="main"
-SCRIPT_VERSION="1.4"
-
-# ====================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (как в KeenKit) ======================
-DATE=$(date +%Y-%m-%d_%H-%M)
-OPT_DIR="/opt"
-TMP_DIR="/tmp"
-STORAGE_DIR="/storage"
+SCRIPT_VERSION="1.5"
 
 print_message() {
   local message="$1"
@@ -24,8 +18,7 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== BACKUP HELPERS ИЗ ОРИГИНАЛЬНОГО KEENKIT ======================
-
+# ====================== BACKUP HELPERS (точно как в KeenKit) ======================
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch
@@ -43,17 +36,14 @@ get_architecture() {
 get_internal_storage_size() {
   local flag="$1"
   local ls_json
-  ls_json=$(rci_request "ls" 2>/dev/null)
+  ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
   local free total
-  free=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"free":' | head -1 | grep -o '[0-9]\+')
-  total=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"total":' | head -1 | grep -o '[0-9]\+')
-  if [ -n "$free" ] && [ -n "$total" ]; then
-    used=$((total - free))
-    if [ "$flag" = "free" ]; then
-      echo $((free / 1024 / 1024))
-    else
-      format_size $used $total
-    fi
+  free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
+  total=$(echo "$ls_json" | grep -o '"total":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
+  if [ "$flag" = "free" ]; then
+    echo $((free / 1024 / 1024))
+  else
+    format_size $((total - free)) $total
   fi
 }
 
@@ -62,11 +52,11 @@ format_size() {
   local used_mb=$((used / 1024 / 1024))
   local total_mb=$((total / 1024 / 1024))
   if [ "$total_mb" -ge 1024 ]; then
-    total_gb=$((total / 1024 / 1024 / 1024))
+    local total_gb=$((total_mb / 1024))
     if [ "$used_mb" -lt 1024 ]; then
       printf "%d MB / %d GB" $used_mb $total_gb
     else
-      used_gb=$((used / 1024 / 1024 / 1024))
+      local used_gb=$((used_mb / 1024))
       printf "%d / %d GB" $used_gb $total_gb
     fi
   else
@@ -74,74 +64,34 @@ format_size() {
   fi
 }
 
-select_drive_extract_value() {
-  echo "$1" | cut -d ':' -f2- | sed 's/^[[:space:]]*//; s/[",]//g'
-}
-
-select_drive_reset_partition() {
-  in_partition=0
-  uuid=""
-  label=""
-  fstype=""
-  total_bytes=""
-  free_bytes=""
-}
-
-select_drive_reset_media() {
-  media_found=1
-  media_is_usb=0
-  current_manufacturer=""
-  select_drive_reset_partition
-}
+select_drive_extract_value() { echo "$1" | cut -d ':' -f2- | sed 's/^[[:space:]]*//; s/[",]//g'; }
+select_drive_reset_partition() { in_partition=0; uuid=""; label=""; fstype=""; total_bytes=""; free_bytes=""; }
+select_drive_reset_media() { media_found=1; media_is_usb=0; current_manufacturer=""; select_drive_reset_partition; }
 
 select_drive_add_partition() {
   local used_bytes display_name fstype_upper
   if [ -z "$uuid" ] || [ -z "$fstype" ] || [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
-    select_drive_reset_partition
-    return
-  fi
+    select_drive_reset_partition; return; fi
   echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
   echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
-  used_bytes=$((total_bytes - free_bytes))
-  [ "$used_bytes" -lt 0 ] && used_bytes=0
-  if [ -n "$label" ]; then
-    display_name="$label"
-  elif [ -n "$current_manufacturer" ]; then
-    display_name="$current_manufacturer"
-  else
-    display_name="Unknown"
-  fi
+  used_bytes=$((total_bytes - free_bytes)); [ "$used_bytes" -lt 0 ] && used_bytes=0
+  if [ -n "$label" ]; then display_name="$label"; elif [ -n "$current_manufacturer" ]; then display_name="$current_manufacturer"; else display_name="Unknown"; fi
   fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
   echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
-  if [ -n "$uuids" ]; then
-    uuids="$uuids
-$uuid"
-  else
-    uuids="$uuid"
-  fi
+  uuids="${uuids:+$uuids
+}$uuid"
   index=$((index + 1))
   select_drive_reset_partition
 }
 
-exit_main_menu() {
-  printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"
-}
+exit_main_menu() { printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"; }
 
 select_drive() {
   local message="$1"
-  local value
-  uuids=""
-  index=2
-  media_found=0
-  media_is_usb=0
-  media_output=$(rci_parse "show media" 2>/dev/null)
+  uuids=""; index=2; media_found=0; media_is_usb=0
+  media_output=$(rci_parse "show media" 2>/dev/null || echo "")
   current_manufacturer=""
   select_drive_reset_partition
-
-  if [ -z "$media_output" ]; then
-    print_message "Не удалось получить список накопителей" "$RED"
-    return 1
-  fi
 
   echo "0. Временное хранилище (tmp)"
   echo "1. Встроенное хранилище ($(get_internal_storage_size))"
@@ -164,30 +114,17 @@ $media_output
 EOF
 
   exit_main_menu
-  if ! read -r -p "$message " choice; then
-    echo ""
-    exit 0
-  fi
+  read -r -p "$message " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
-  if [ "$choice" = "00" ]; then
-    main_menu
-  fi
+  [ "$choice" = "00" ] && main_menu
   echo ""
   case "$choice" in
-    0) selected_drive="$TMP_DIR" ;;
-    1) selected_drive="$STORAGE_DIR" ;;
+    0) selected_drive="/tmp" ;;
+    1) selected_drive="/storage" ;;
     *)
-      if [ -n "$uuids" ]; then
-        selected_drive=$(printf '%s\n' "$uuids" | sed -n "$((choice - 1))p")
-        if [ -z "$selected_drive" ]; then
-          print_message "Неверный выбор" "$RED"
-          exit_function
-        fi
-        selected_drive="/tmp/mnt/$selected_drive"
-      else
-        print_message "Неверный выбор" "$RED"
-        exit_function
-      fi
+      selected_drive=$(printf '%s\n' "$uuids" | sed -n "$((choice - 1))p")
+      [ -z "$selected_drive" ] && { print_message "Неверный выбор" "$RED"; exit_function; }
+      selected_drive="/tmp/mnt/$selected_drive"
       ;;
   esac
 }
@@ -196,68 +133,46 @@ spinner_start() {
   SPINNER_MSG="$1"
   local spin='|/-\\' i=0
   echo -n "[ ] $SPINNER_MSG"
-  ( while :; do i=$(((i + 1) % 4)); printf "\r[%s] %s" "${spin:$i:1}" "$SPINNER_MSG"; usleep 100000; done ) &
+  (while :; do i=$(((i+1)%4)); printf "\r[%s] %s" "${spin:$i:1}" "$SPINNER_MSG"; usleep 100000; done) &
   SPINNER_PID=$!
 }
 
 spinner_stop() {
   local rc=${1:-0}
-  if [ -n "$SPINNER_PID" ]; then
-    kill "$SPINNER_PID" 2>/dev/null
-    wait "$SPINNER_PID" 2>/dev/null
-    unset SPINNER_PID
-  fi
-  if [ $rc -eq 0 ]; then
-    printf "\r[✔] %s\n" "$SPINNER_MSG"
-  else
-    printf "\r[✖] %s\n" "$SPINNER_MSG"
-  fi
+  [ -n "$SPINNER_PID" ] && { kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null; unset SPINNER_PID; }
+  [ $rc -eq 0 ] && printf "\r[✔] %s\n" "$SPINNER_MSG" || printf "\r[✖] %s\n" "$SPINNER_MSG"
 }
 
 exit_function() {
   echo ""
-  if [ ! -t 0 ]; then exit 0; fi
-  if ! read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."; then echo ""; exit 0; fi
+  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..." || echo ""
   pkill -P $$ 2>/dev/null
-  exec "$OPT_DIR/$SCRIPT"
+  exec /opt/keenextras.sh
 }
 
 packages_checker() {
   local packages="$1"
-  local flag="$2"
   local missing=""
-  local installed
-  installed=$(opkg list-installed 2>/dev/null)
   for pkg in $packages; do
-    if ! echo "$installed" | grep -q "^$pkg "; then
-      missing="$missing $pkg"
-    fi
+    if ! opkg list-installed | grep -q "^$pkg "; then missing="$missing $pkg"; fi
   done
-  if [ -n "$missing" ]; then
-    print_message "Устанавливаем:$missing" "$GREEN"
-    opkg update >/dev/null 2>&1
-    opkg install $missing $flag
-    echo ""
-  fi
+  [ -n "$missing" ] && { print_message "Устанавливаем:$missing" "$GREEN"; opkg update >/dev/null 2>&1; opkg install $missing; echo ""; }
 }
 
-# ====================== BACKUP ENTWARE (ТОЧНО КАК В KEENKIT) ======================
-
+# ====================== БЭКАП ENTWARE (полностью как в KeenKit) ======================
 backup_entware() {
   packages_checker "tar libacl"
-  output=$(mount)
   select_drive "Выберите накопитель:"
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
-  
+
   spinner_start "Выполняю копирование"
-  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$(basename "$backup_file")" . 2>&1)
+  tar_output=$(tar cvzf "$backup_file" -C /opt --exclude="$(basename "$backup_file")" . 2>&1)
   rc=$?
 
-  log_operation=$(echo "$tar_output" | tail -n 2)
-  if echo "$log_operation" | grep -iq "error\|no space left on device"; then
+  if echo "$tar_output" | tail -n 2 | grep -iq "error\|no space left"; then
     spinner_stop 1
     print_message "Ошибка при создании бэкапа:" "$RED"
-    echo "$log_operation"
+    echo "$tar_output" | tail -n 5
   else
     spinner_stop 0
     print_message "Бэкап успешно сохранен в $backup_file" "$GREEN"
@@ -265,105 +180,68 @@ backup_entware() {
   exit_function
 }
 
-# ====================== ОСТАЛЬНЫЕ ФУНКЦИИ (AWG, NFQWS, UPDATE) ======================
-# (все функции install_awg_last, install_awg_version, remove_awg, install_nfqws и т.д. — без изменений)
-
-install_awg_last() {
-  print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
-  curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
-}
-
+# ====================== AWG & NFQWS ======================
+install_awg_last() { print_message "Установка AWG Manager (последняя версия)..." "$GREEN"; curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh; }
 install_awg_version() {
   print_message "Установка выбранной версии AWG Manager..." "$CYAN"
   opkg install curl ca-certificates wget-ssl 2>/dev/null || true
   A=$(opkg print-architecture 2>/dev/null | sort -k3 -nr | awk '$2!="all"{print $2;exit}')
-  case $A in
-    aarch64*) S="aarch64-3.10-kn"; R="aarch64-k3.10" ;;
-    mipsel*)  S="mipsel-3.4-kn";  R="mipsel-k3.4" ;;
-    mips*)    S="mips-3.4-kn";    R="mips-k3.4" ;;
-    *) print_message "❌ Неизвестная архитектура: $A" "$RED"; return 1 ;;
-  esac
+  case $A in aarch64*) S="aarch64-3.10-kn";; mipsel*) S="mipsel-3.4-kn";; mips*) S="mips-3.4-kn";; *) print_message "❌ Неизвестная архитектура" "$RED"; return 1;; esac
   echo "✅ Архитектура: $A"
   V=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p'); V=${V#v}
   [ -z "$V" ] && { print_message "❌ Не удалось получить версию" "$RED"; return 1; }
   echo "✅ Последняя версия: $V"
-  printf "Введите версию (Enter = $V): "; read -r ver
-  [ -z "$ver" ] && ver=$V
+  printf "Введите версию (Enter = $V): "; read -r ver; [ -z "$ver" ] && ver=$V
   cd /tmp || return 1
   print_message "📥 Скачивание awg-manager v$ver..." "$GREEN"
-  curl -L# -o "awg-manager_${ver}_${S}.ipk" "https://github.com/hoaxisr/awg-manager/releases/download/v${ver}/awg-manager_${ver}_${S}.ipk" || {
-    print_message "❌ Ошибка скачивания!" "$RED"; return 1
-  }
-  opkg install --force-downgrade "awg-manager_${ver}_${S}.ipk" && \
-    print_message "🎉 AWG Manager v$ver успешно установлен!" "$GREEN" || \
-    print_message "⚠️ Ошибка установки" "$RED"
+  curl -L# -o "awg-manager_${ver}_${S}.ipk" "https://github.com/hoaxisr/awg-manager/releases/download/v${ver}/awg-manager_${ver}_${S}.ipk" || { print_message "❌ Ошибка скачивания!" "$RED"; return 1; }
+  opkg install --force-downgrade "awg-manager_${ver}_${S}.ipk" && print_message "🎉 AWG Manager v$ver успешно установлен!" "$GREEN" || print_message "⚠️ Ошибка установки" "$RED"
   rm -f "awg-manager_${ver}_${S}.ipk" 2>/dev/null
-  echo "Обновление в будущем: opkg update && opkg upgrade awg-manager"
 }
+remove_awg() { print_message "Удаление AWG Manager..." "$RED"; opkg remove --autoremove awg-manager 2>/dev/null || true; rm -rf /opt/etc/awg-manager /opt/etc/opkg/awg_manager.conf; print_message "AWG Manager полностью удалён" "$GREEN"; }
 
-remove_awg() {
-  print_message "Удаление AWG Manager..." "$RED"
-  opkg remove --autoremove awg-manager 2>/dev/null || true
-  rm -rf /opt/etc/awg-manager /opt/etc/opkg/awg_manager.conf
-  print_message "AWG Manager полностью удалён" "$GREEN"
-}
-
-install_nfqws() {
-  print_message "Установка NFQWS..." "$GREEN"
-  mkdir -p /opt/etc/opkg
-  echo "src/gz nfqws-keenetic https://nfqws.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf
-  opkg update >/dev/null 2>&1
-  opkg install nfqws-keenetic
-}
-
-install_nfqws2() {
-  print_message "Установка NFQWS2..." "$GREEN"
-  mkdir -p /opt/etc/opkg
-  echo "src/gz nfqws2-keenetic https://nfqws.github.io/nfqws2-keenetic/all" > /opt/etc/opkg/nfqws2-keenetic.conf
-  opkg update >/dev/null 2>&1
-  opkg install nfqws2-keenetic
-}
-
-install_nfqws_web() {
-  print_message "Установка веб-интерфейса NFQWS..." "$GREEN"
-  opkg install ca-certificates wget-ssl 2>/dev/null || true
-  opkg remove wget-nossl 2>/dev/null || true
-  mkdir -p /opt/etc/opkg
-  echo "src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf
-  opkg update >/dev/null 2>&1
-  opkg install nfqws-keenetic-web && \
-    print_message "🎉 Веб-интерфейс NFQWS успешно установлен!" "$GREEN" || \
-    print_message "⚠️ Ошибка установки" "$RED"
-}
-
-remove_nfqws() {
-  print_message "Удаление всех компонентов NFQWS..." "$RED"
-  opkg remove --autoremove nfqws-keenetic nfqws2-keenetic nfqws-keenetic-web 2>/dev/null || true
-  rm -f /opt/etc/opkg/nfqws-*.conf
-  print_message "NFQWS полностью удалён" "$GREEN"
-}
+install_nfqws() { print_message "Установка NFQWS..." "$GREEN"; mkdir -p /opt/etc/opkg; echo "src/gz nfqws-keenetic https://nfqws.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf; opkg update >/dev/null 2>&1; opkg install nfqws-keenetic; }
+install_nfqws2() { print_message "Установка NFQWS2..." "$GREEN"; mkdir -p /opt/etc/opkg; echo "src/gz nfqws2-keenetic https://nfqws.github.io/nfqws2-keenetic/all" > /opt/etc/opkg/nfqws2-keenetic.conf; opkg update >/dev/null 2>&1; opkg install nfqws2-keenetic; }
+install_nfqws_web() { print_message "Установка веб-интерфейса NFQWS..." "$GREEN"; opkg install ca-certificates wget-ssl 2>/dev/null || true; opkg remove wget-nossl 2>/dev/null || true; mkdir -p /opt/etc/opkg; echo "src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf; opkg update >/dev/null 2>&1; opkg install nfqws-keenetic-web && print_message "🎉 Веб-интерфейс NFQWS успешно установлен!" "$GREEN" || print_message "⚠️ Ошибка установки" "$RED"; }
+remove_nfqws() { print_message "Удаление всех компонентов NFQWS..." "$RED"; opkg remove --autoremove nfqws-keenetic nfqws2-keenetic nfqws-keenetic-web 2>/dev/null || true; rm -f /opt/etc/opkg/nfqws-*.conf; print_message "NFQWS полностью удалён" "$GREEN"; }
 
 update_menu() {
   print_message "Обновление KeenExtras..." "$CYAN"
-  curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || {
-    print_message "❌ Не удалось скачать обновление" "$RED"
-    return 1
-  }
-  mv /opt/keenextras.sh.tmp /opt/keenextras.sh
-  chmod +x /opt/keenextras.sh
+  curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { print_message "❌ Не удалось скачать обновление" "$RED"; return 1; }
+  mv /opt/keenextras.sh.tmp /opt/keenextras.sh; chmod +x /opt/keenextras.sh
   print_message "✅ KeenExtras успешно обновлён до v${SCRIPT_VERSION}" "$GREEN"
-  echo "Перезапуск меню..."
-  sleep 1
-  exec /opt/keenextras.sh
+  echo "Перезапуск меню..."; sleep 1; exec /opt/keenextras.sh
 }
 
 cleanup() { echo -e "\n${NC}Выход...${NC}"; }
 
-# ====================== МЕНЮ (без изменений) ======================
+# ====================== МЕНЮ ======================
+awg_menu() {
+  while true; do
+    printf "\033c"; printf "${CYAN}=== AWG Manager ===${NC}\n\n"
+    echo "1. Установить последнюю версию AWG Manager"
+    echo "2. Установить выбранную версию AWG Manager"
+    echo "3. Удалить AWG Manager"
+    echo ""; echo "0. Назад в главное меню"; echo ""
+    read -r -p "Выберите действие: " choice
+    case "$choice" in 1) install_awg_last;; 2) install_awg_version;; 3) remove_awg;; 0|00) return;; *) echo "Неверный выбор";; esac
+    echo ""; read -r -p "Нажмите Enter для продолжения..."
+  done
+}
 
-awg_menu() { ... }   # (тот же код что был раньше)
-
-nfqws_menu() { ... } # (тот же код что был раньше)
+nfqws_menu() {
+  while true; do
+    printf "\033c"; printf "${CYAN}=== NFQWS ===${NC}\n\n"
+    echo "1. Установить NFQWS"
+    echo "2. Установить NFQWS2"
+    echo "3. Установить веб-интерфейс NFQWS"
+    echo "4. Удалить NFQWS (все компоненты)"
+    echo ""; echo "0. Назад в главное меню"; echo ""
+    read -r -p "Выберите действие: " choice
+    case "$choice" in 1) install_nfqws;; 2) install_nfqws2;; 3) install_nfqws_web;; 4) remove_nfqws;; 0|00) return;; *) echo "Неверный выбор";; esac
+    echo ""; read -r -p "Нажмите Enter для продолжения..."
+  done
+}
 
 print_main_menu() {
   printf "\033c"
@@ -400,3 +278,5 @@ main_menu() {
 }
 
 main_menu
+EOF
+chmod +x /opt/keenextras.sh && /opt/keenextras.sh
