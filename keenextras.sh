@@ -6,10 +6,10 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-REPO="keen-extras"          # ← имя твоего репозитория
+REPO="keen-extras"
 SCRIPT="keenextras.sh"
 BRANCH="main"
-SCRIPT_VERSION="1.0"
+SCRIPT_VERSION="1.1"   # ← обновил версию
 
 print_message() {
   local message="$1"
@@ -18,38 +18,63 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== ФУНКЦИИ ======================
+# ====================== AWG MANAGER ======================
 
 install_awg_last() {
-  print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
+  print_message "Установка AWG Manager (последняя версия через официальный скрипт)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
 }
 
 install_awg_version() {
-  print_message "Выбор версии AWG Manager (через opkg)" "$CYAN"
-  echo "Сначала обновляем список пакетов..."
-  opkg update >/dev/null 2>&1
+  print_message "Выбор версии AWG Manager для установки..." "$CYAN"
   
-  echo -e "\nДоступные версии awg-manager:"
-  opkg list awg-manager | cat
+  # Устанавливаем необходимые пакеты
+  opkg install curl ca-certificates wget-ssl 2>/dev/null || true
   
-  echo -e "\nВведи версию (например 2.7.6) или Enter для последней:"
-  read -r ver
-  if [ -n "$ver" ]; then
-    opkg install "awg-manager=$ver"
-  else
-    opkg install awg-manager
-  fi
+  # Определение архитектуры
+  A=$(opkg print-architecture 2>/dev/null | sort -k3 -nr | awk '$2!="all"{print $2;exit}')
+  case $A in
+    aarch64*) S="aarch64-3.10-kn"; R="aarch64-k3.10" ;;
+    mipsel*)  S="mipsel-3.4-kn";  R="mipsel-k3.4" ;;
+    mips*)    S="mips-3.4-kn";    R="mips-k3.4" ;;
+    *) echo "❌ Неизвестная архитектура: $A"; return 1 ;;
+  esac
+  
+  echo "✅ Архитектура: $A"
+  
+  # Получаем последнюю версию
+  V=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p'); V=${V#v}
+  [ -z "$V" ] && { print_message "❌ Не удалось получить последнюю версию" "$RED"; return 1; }
+  echo "✅ Последняя версия: $V"
+  
+  printf "Введите версию (Enter = $V): "; read -r ver
+  [ -z "$ver" ] && ver=$V
+  
+  cd /tmp || return 1
+  print_message "📥 Скачивание awg-manager v$ver..." "$GREEN"
+  
+  curl -L# -o "awg-manager_${ver}_${S}.ipk" \
+    "https://github.com/hoaxisr/awg-manager/releases/download/v${ver}/awg-manager_${ver}_${S}.ipk" || {
+    print_message "❌ Ошибка скачивания!" "$RED"
+    return 1
+  }
+  
+  opkg install --force-downgrade "awg-manager_${ver}_${S}.ipk" && \
+    print_message "🎉 AWG Manager v$ver успешно установлен!" "$GREEN" || \
+    print_message "⚠️ Ошибка установки" "$RED"
+  
+  rm -f "awg-manager_${ver}_${S}.ipk" 2>/dev/null
+  echo "Для обновления в будущем: opkg update && opkg upgrade awg-manager"
 }
 
 remove_awg() {
   print_message "Удаление AWG Manager..." "$RED"
   opkg remove --autoremove awg-manager 2>/dev/null || true
-  rm -rf /opt/etc/awg-manager
+  rm -rf /opt/etc/awg-manager /opt/etc/opkg/awg_manager.conf
   print_message "AWG Manager полностью удалён" "$GREEN"
 }
 
-# ---------------- NFQWS ----------------
+# ====================== NFQWS ======================
 
 install_nfqws() {
   print_message "Установка NFQWS..." "$GREEN"
@@ -68,11 +93,18 @@ install_nfqws2() {
 }
 
 install_nfqws_web() {
-  print_message "Установка веб-интерфейса NFQWS..." "$GREEN"
+  print_message "Установка Веб-интерфейса NFQWS..." "$GREEN"
+  
+  # Фикс подвисания (обязательные зависимости)
+  opkg install ca-certificates wget-ssl 2>/dev/null || true
+  opkg remove wget-nossl 2>/dev/null || true
+  
   mkdir -p /opt/etc/opkg
-  echo "src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf
+  echo " src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf
   opkg update >/dev/null 2>&1
-  opkg install nfqws-keenetic-web
+  opkg install nfqws-keenetic-web && \
+    print_message "🎉 Веб-интерфейс NFQWS установлен!" "$GREEN" || \
+    print_message "⚠️ Ошибка установки веб-интерфейса" "$RED"
 }
 
 remove_nfqws() {
@@ -82,7 +114,7 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
-# ---------------- Backup Entware ----------------
+# ====================== BACKUP ======================
 
 backup_entware() {
   local DATE=$(date +%Y-%m-%d_%H-%M)
@@ -98,9 +130,7 @@ backup_entware() {
   fi
 }
 
-cleanup() {
-  echo -e "\n${NC}Выход...${NC}"
-}
+cleanup() { echo -e "\n${NC}Выход...${NC}"; }
 
 # ====================== МЕНЮ ======================
 
@@ -111,7 +141,7 @@ awg_menu() {
     echo "1.1  Установка AWG Manager (Last Release)"
     echo "1.2  Выбор версии для установки"
     echo "1.3  Удаление AWG Manager"
-    echo "0.   Назад в главное меню"
+    echo "0.   Назад"
     echo ""
     read -r -p "Выберите действие: " choice
     case "$choice" in
@@ -133,7 +163,7 @@ nfqws_menu() {
     echo "2.2  Установка NFQWS2"
     echo "2.3  Установка Веб-интерфейса NFQWS"
     echo "2.4  Удаление NFQWS (все компоненты)"
-    echo "0.   Назад в главное меню"
+    echo "0.   Назад"
     echo ""
     read -r -p "Выберите действие: " choice
     case "$choice" in
@@ -157,7 +187,7 @@ print_main_menu() {
 / /| /  __/  __/ / / / /| |/ / /_
 /_/ |_\___/\___/_/ /_/_/ |_/_/\__/
 EOF
-  printf "${CYAN}KeenExtras v${SCRIPT_VERSION} by @yourname${NC}\n\n"
+  printf "${CYAN}KeenExtras v${SCRIPT_VERSION}${NC}\n\n"
   echo "1. AWG Manager"
   echo "2. NFQWS"
   echo "3. Backup Entware"
@@ -178,14 +208,6 @@ main_menu() {
     esac
     echo ""; read -r -p "Нажмите Enter для продолжения..."
   done
-}
-
-# ====================== ЗАПУСК ======================
-
-packages_checker() {
-  # если нужно добавить зависимости — раскомментируй
-  # opkg install curl jq 2>/dev/null || true
-  :
 }
 
 main_menu
