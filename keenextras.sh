@@ -12,6 +12,7 @@ BRANCH="main"
 SCRIPT_VERSION="1.7"
 DATE=$(date +%Y-%m-%d_%H-%M)
 OPT_DIR="/opt"
+USERNAME="rndnaame"
 
 print_message() {
   local message="$1"
@@ -20,71 +21,68 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== НОВЫЙ ОРИГИНАЛЬНЫЙ ЛОГО KEENEXTRAS ======================
+# ====================== ГРАФИЧЕСКИЙ ЛОГО ======================
 print_logo() {
   cat <<'EOF'
-   __  __          _   _ _____           _           
-  |  \/  | ___  __| | | | ____|_  ___ __ | | ___  __ _ 
-  | |\/| |/ _ \/ _` | | |  _| \ \/ / '_ \| |/ _ \/ _` |
-  | |  | |  __/ (_| | | | |___ >  <| |_) | |  __/ (_| |
-  |_|  |_|\___|\__,_| |_|_____/_/\_\ .__/|_|\___|\__,_|
-                                    |_|                  
-              KeenExtras
+   __ __                __ __ _ __
+  / //_/__  ___  ____  / //_/(_) /_
+ / ,< / _ \/ _ \/ __ \/ ,<  / / __/
+ / /| /  __/  __/ / / / /| |/ / /_
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/
+               KeenExtras
 EOF
 }
 
-# ====================== СИСТЕМНАЯ ИНФОРМАЦИЯ — ТОЧНО КАК В ОРИГИНАЛЬНОМ KEENKIT ======================
-get_model() {
-  local ver=$(rci_request 'show version' 2>/dev/null)
-  local model=$(echo "$ver" | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown")
-  local fw=$(echo "$ver" | grep -o 'Firmware:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "Unknown")
-  echo "${model} | ${fw}"
-}
-
-get_cpu_line() {
-  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || echo "Unknown")
-  local arch=$(opkg print-architecture 2>/dev/null | grep -oE 'aarch64|mipsel|mips' | head -n1 || echo "unknown")
-  local temps=$(rci_request 'show temperature' 2>/dev/null || echo "")
-  local wifi_temp=$(echo "$temps" | grep -o 'wifi:[0-9]*' | cut -d: -f2 || echo "N/A")
-  local cpu_temp=$(echo "$temps" | grep -o 'cpu:[0-9]*' | cut -d: -f2 || echo "N/A")
-  echo "${soc} (${arch}) | Wi-Fi: ${wifi_temp}°C | CPU: ${cpu_temp}°C"
-}
-
-get_ram_line() {
-  local total=$(free -m 2>/dev/null | awk 'NR==2 {print $2}')
-  local used=$(free -m 2>/dev/null | awk 'NR==2 {print $3}')
-  [ -z "$total" ] && total=0
-  [ -z "$used" ] && used=0
-  echo "$used / $total MB"
-}
-
-get_opkg_line() {
-  local df_out=$(df -m /opt 2>/dev/null | tail -1)
-  local used=$(echo "$df_out" | awk '{print $3}')
-  local total=$(echo "$df_out" | awk '{print $2}')
-  [ -z "$used" ] && used=0
-  [ -z "$total" ] && total=0
-  echo "$used / $total MB"
-}
-
-get_uptime_line() {
-  uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//'
-}
-
-# ====================== BACKUP ENTWARE (полностью как в KeenKit) ======================
+# ====================== СИСТЕМНАЯ ИНФОРМАЦИЯ ТОЧНО КАК В KEENKIT ======================
 get_architecture() {
-  if [ -z "$ARCHITECTURE" ]; then
-    local arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
-    case "$arch" in
-      "mips-3") ARCHITECTURE="mips" ;;
-      "mipsel-3") ARCHITECTURE="mipsel" ;;
-      "aarch64-3") ARCHITECTURE="aarch64" ;;
-      *) ARCHITECTURE="unknown_arch" ;;
-    esac
-  fi
-  echo "$ARCHITECTURE"
+  opkg print-architecture 2>/dev/null | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n1 | cut -d- -f1 || echo "unknown"
 }
 
+get_device() {
+  rci_request 'show version' 2>/dev/null | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown"
+}
+
+get_hw_id() {
+  cat /tmp/sysinfo/board_name 2>/dev/null || echo "Unknown"
+}
+
+get_fw_version() {
+  rci_request 'show version' 2>/dev/null | grep -o 'Firmware:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "Unknown"
+}
+
+get_boot_current() {
+  rci_request 'show version' 2>/dev/null | grep -o 'Boot current slot:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "1"
+}
+
+get_cpu_model() {
+  cat /tmp/sysinfo/soc 2>/dev/null || grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown"
+}
+
+get_temperatures() {
+  local temp=$(rci_request 'show temperature' 2>/dev/null)
+  local wifi=$(echo "$temp" | grep -o 'wifi:[0-9]*' | cut -d: -f2 || echo "N/A")
+  local cpu=$(echo "$temp" | grep -o 'cpu:[0-9]*' | cut -d: -f2 || echo "N/A")
+  echo " | Wi-Fi: ${wifi}°C | CPU: ${cpu}°C"
+}
+
+get_modem() { :; }          # заглушка (можно расширить позже)
+get_mws_members() { :; }    # заглушка для ретрансляторов
+
+get_ram_usage() {
+  free -m 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " MB"}' || echo "0 / 0 MB"
+}
+
+get_opkg_storage() {
+  df -m /opt 2>/dev/null | tail -1 | awk '{print $3 " / " $2 " MB"}' || echo "0 / 0 MB"
+}
+
+get_uptime() {
+  uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//' || echo "Unknown"
+}
+
+check_update() { :; }       # заглушка
+
+# ====================== BACKUP ENTWARE (как в KeenKit) ======================
 get_internal_storage_size() {
   local ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
   local free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
@@ -214,7 +212,7 @@ backup_entware() {
   exit_function
 }
 
-# ====================== AWG + NFQWS + UPDATE ======================
+# ====================== AWG MANAGER ======================
 install_awg_last() { 
   print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
@@ -244,6 +242,7 @@ remove_awg() {
   print_message "AWG Manager полностью удалён" "$GREEN"
 }
 
+# ====================== NFQWS ======================
 install_nfqws() { 
   print_message "Установка NFQWS..." "$GREEN"
   mkdir -p /opt/etc/opkg
@@ -277,6 +276,7 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
+# ====================== ОБНОВЛЕНИЕ ======================
 update_menu() {
   print_message "Обновление KeenExtras..." "$CYAN"
   curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { print_message "❌ Не удалось скачать обновление" "$RED"; return 1; }
@@ -339,16 +339,30 @@ nfqws_menu() {
   done
 }
 
-# ====================== ГЛАВНОЕ МЕНЮ ======================
+# ====================== ГЛАВНОЕ МЕНЮ (ТОЧНО КАК В KEENKIT) ======================
 print_main_menu() {
   printf "\033c"
   print_logo
-  printf "${CYAN}Модель:          %s${NC}\n" "$(get_model)"
-  printf "${CYAN}Процессор:       %s${NC}\n" "$(get_cpu_line)"
-  printf "${CYAN}ОЗУ:             %s${NC}\n" "$(get_ram_line)"
-  printf "${CYAN}OPKG:            %s${NC}\n" "$(get_opkg_line)"
-  printf "${CYAN}Время работы:    %s${NC}\n" "$(get_uptime_line)"
-  printf "${CYAN}Версия:          %s by rndnaame${NC}\n\n" "$SCRIPT_VERSION"
+
+  arch="$(get_architecture)"
+  printf "${CYAN}Модель: ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: $(get_boot_current))"
+  printf "${CYAN}Процессор: ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
+
+  if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
+    printf "${CYAN}Модем: ${NC}%s\n" "$get_modem_info"
+  fi
+
+  printf "${CYAN}ОЗУ: ${NC}%s\n" "$(get_ram_usage)"
+  printf "${CYAN}OPKG: ${NC}%s\n" "$(get_opkg_storage)"
+  printf "${CYAN}Время работы: ${NC}%s\n" "$(get_uptime)"
+
+  if get_repeaters_info=$(get_mws_members); [ -n "$get_repeaters_info" ]; then
+    printf "${CYAN}Ретрансляторы: ${NC}"
+    printf "%b\n" "$get_repeaters_info"
+  fi
+
+  printf "${CYAN}Версия: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
+  
   echo "1. AWG Manager"
   echo "2. NFQWS"
   echo "3. Бэкап Entware"
