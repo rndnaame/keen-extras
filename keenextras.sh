@@ -20,7 +20,7 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== ЛОГО (только в подменю) ======================
+# ====================== ГРАФИЧЕСКИЙ ЛОГО (вернул обратно) ======================
 print_logo() {
   cat <<'EOF'
    _  __                  _____           _           
@@ -35,15 +35,23 @@ EOF
 
 # ====================== СИСТЕМНАЯ ИНФОРМАЦИЯ ТОЧНО КАК В KEENKIT ======================
 get_model() {
-  local model=$(rci_request 'show version' 2>/dev/null | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown")
-  local fw=$(rci_request 'show version' 2>/dev/null | grep -o 'Firmware:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "Unknown")
+  local ver=$(rci_request 'show version' 2>/dev/null)
+  local model=$(echo "$ver" | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown")
+  local fw=$(echo "$ver" | grep -o 'Firmware:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "Unknown")
+  [ -z "$model" ] && model="Unknown"
+  [ -z "$fw" ] && fw="Unknown"
   echo "${model} | ${fw}"
 }
 
 get_cpu_line() {
-  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown")
+  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || echo "")
   local arch=$(opkg print-architecture 2>/dev/null | grep -oE 'aarch64|mipsel|mips' | head -n1 || echo "unknown")
-  echo "${soc} (${arch})"
+  if [ -n "$soc" ]; then
+    echo "${soc} (${arch})"
+  else
+    local cpu=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown")
+    echo "${cpu} (${arch})"
+  fi
 }
 
 get_ram_line() {
@@ -67,7 +75,9 @@ get_uptime_line() {
   uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//'
 }
 
-# ====================== BACKUP ENTWARE (полностью как в KeenKit) ======================
+# ====================== BACKUP ENTWARE (как в KeenKit) ======================
+# (все функции backup оставлены без изменений — они уже работали корректно)
+
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
@@ -335,9 +345,10 @@ nfqws_menu() {
   done
 }
 
-# ====================== ГЛАВНОЕ МЕНЮ (ТОЧНО КАК В KEENKIT) ======================
+# ====================== ГЛАВНОЕ МЕНЮ ======================
 print_main_menu() {
   printf "\033c"
+  print_logo
   printf "${CYAN}Модель:          %s${NC}\n" "$(get_model)"
   printf "${CYAN}Процессор:       %s${NC}\n" "$(get_cpu_line)"
   printf "${CYAN}ОЗУ:             %s${NC}\n" "$(get_ram_line)"
