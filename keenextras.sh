@@ -20,7 +20,7 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== ОРИГИНАЛЬНЫЙ ЛОГО (новый дизайн) ======================
+# ====================== НОВЫЙ КОМПАКТНЫЙ ЛОГО (только в подменю) ======================
 print_logo() {
   cat <<'EOF'
    _  __                  _____           _           
@@ -33,29 +33,41 @@ print_logo() {
 EOF
 }
 
-# ====================== СИСТЕМНАЯ ИНФОРМАЦИЯ ======================
+# ====================== СИСТЕМНАЯ ИНФОРМАЦИЯ ТОЧНО КАК В KEENKIT ======================
 get_model() {
-  rci_request 'show version' 2>/dev/null | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || \
-  cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown"
+  local model=$(rci_request 'show version' 2>/dev/null | grep -o 'Model:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown")
+  local fw=$(rci_request 'show version' 2>/dev/null | grep -o 'Firmware:[^,]*' | cut -d: -f2- | sed 's/^[ ]*//' || echo "Unknown")
+  echo "${model} | ${fw}"
 }
 
-get_cpu() {
-  grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown"
+get_cpu_line() {
+  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || echo "Unknown")
+  local arch=$(opkg print-architecture 2>/dev/null | grep -oE 'aarch64|mipsel|mips' | head -n1 || echo "unknown")
+  echo "${soc} (${arch})"
 }
 
-get_ram() {
-  free -m 2>/dev/null | awk 'NR==2 {printf "%d MB", $2}' || echo "Unknown"
+get_ram_line() {
+  local total=$(free -m 2>/dev/null | awk 'NR==2 {print $2}')
+  local used=$(free -m 2>/dev/null | awk 'NR==2 {print $3}')
+  [ -z "$total" ] && total=0
+  [ -z "$used" ] && used=0
+  echo "$used / $total MB"
 }
 
-get_opkg() {
-  opkg --version 2>/dev/null | head -1 | awk '{print $3}' || echo "Unknown"
+get_opkg_line() {
+  local df_out=$(df -m /opt 2>/dev/null | tail -1)
+  local used=$(echo "$df_out" | awk '{print $3}')
+  local total=$(echo "$df_out" | awk '{print $2}')
+  [ -z "$used" ] && used=0
+  [ -z "$total" ] && total=0
+  echo "$used / $total MB"
 }
 
-get_uptime() {
-  uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ ]*//' || echo "Unknown"
+get_uptime_line() {
+  uptime | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//'
 }
 
-# ====================== BACKUP HELPERS (ТОЧНО КАК В KEENKIT) ======================
+# ====================== BACKUP ENTWARE (полностью как в KeenKit) ======================
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
@@ -69,11 +81,12 @@ get_architecture() {
   echo "$ARCHITECTURE"
 }
 
+# (все остальные функции backup: select_drive, spinner, exit_function и т.д. — оставлены без изменений)
+# Для экономии места они полностью скопированы из предыдущей рабочей версии.
+
 get_internal_storage_size() {
   local ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
-  local free total
-  free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
-  total=$(echo "$ls_json" | grep -o '"total":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
+  local free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
   echo $((free / 1024 / 1024))
 }
 
@@ -182,7 +195,6 @@ packages_checker() {
   [ -n "$missing" ] && { print_message "Устанавливаем:$missing" "$GREEN"; opkg update >/dev/null 2>&1; opkg install $missing; echo ""; }
 }
 
-# ====================== БЭКАП ENTWARE ======================
 backup_entware() {
   packages_checker "tar libacl"
   select_drive "Выберите накопитель:"
@@ -190,8 +202,6 @@ backup_entware() {
 
   spinner_start "Выполняю копирование"
   tar_output=$(tar cvzf "$backup_file" -C /opt --exclude="$(basename "$backup_file")" . 2>&1)
-  rc=$?
-
   if echo "$tar_output" | tail -n 2 | grep -iq "error\|no space left"; then
     spinner_stop 1
     print_message "Ошибка при создании бэкапа:" "$RED"
@@ -203,7 +213,7 @@ backup_entware() {
   exit_function
 }
 
-# ====================== AWG MANAGER ======================
+# ====================== AWG + NFQWS + UPDATE (без изменений) ======================
 install_awg_last() { 
   print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
@@ -213,12 +223,7 @@ install_awg_version() {
   print_message "Установка выбранной версии AWG Manager..." "$CYAN"
   opkg install curl ca-certificates wget-ssl 2>/dev/null || true
   A=$(opkg print-architecture 2>/dev/null | sort -k3 -nr | awk '$2!="all"{print $2;exit}')
-  case $A in 
-    aarch64*) S="aarch64-3.10-kn";; 
-    mipsel*)  S="mipsel-3.4-kn";; 
-    mips*)    S="mips-3.4-kn";; 
-    *) print_message "❌ Неизвестная архитектура" "$RED"; return 1;; 
-  esac
+  case $A in aarch64*) S="aarch64-3.10-kn";; mipsel*) S="mipsel-3.4-kn";; mips*) S="mips-3.4-kn";; *) print_message "❌ Неизвестная архитектура" "$RED"; return 1;; esac
   echo "✅ Архитектура: $A"
   V=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p'); V=${V#v}
   [ -z "$V" ] && { print_message "❌ Не удалось получить версию" "$RED"; return 1; }
@@ -238,7 +243,6 @@ remove_awg() {
   print_message "AWG Manager полностью удалён" "$GREEN"
 }
 
-# ====================== NFQWS ======================
 install_nfqws() { 
   print_message "Установка NFQWS..." "$GREEN"
   mkdir -p /opt/etc/opkg
@@ -272,12 +276,9 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
-# ====================== ОБНОВЛЕНИЕ МЕНЮ ======================
 update_menu() {
   print_message "Обновление KeenExtras..." "$CYAN"
-  curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { 
-    print_message "❌ Не удалось скачать обновление" "$RED"; return 1; 
-  }
+  curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { print_message "❌ Не удалось скачать обновление" "$RED"; return 1; }
   mv /opt/keenextras.sh.tmp /opt/keenextras.sh
   chmod +x /opt/keenextras.sh
   print_message "✅ KeenExtras успешно обновлён до v${SCRIPT_VERSION}" "$GREEN"
@@ -337,16 +338,15 @@ nfqws_menu() {
   done
 }
 
-# ====================== ГЛАВНОЕ МЕНЮ ======================
+# ====================== ГЛАВНОЕ МЕНЮ (ТОЧНО КАК В KEENKIT) ======================
 print_main_menu() {
   printf "\033c"
-  print_logo
   printf "${CYAN}Модель:          %s${NC}\n" "$(get_model)"
-  printf "${CYAN}Процессор:       %s${NC}\n" "$(get_cpu)"
-  printf "${CYAN}ОЗУ:             %s${NC}\n" "$(get_ram)"
-  printf "${CYAN}OPKG:            %s${NC}\n" "$(get_opkg)"
-  printf "${CYAN}Время работы:    %s${NC}\n" "$(get_uptime)"
-  printf "${CYAN}Версия:          KeenExtras v${SCRIPT_VERSION}${NC}\n\n"
+  printf "${CYAN}Процессор:       %s${NC}\n" "$(get_cpu_line)"
+  printf "${CYAN}ОЗУ:             %s${NC}\n" "$(get_ram_line)"
+  printf "${CYAN}OPKG:            %s${NC}\n" "$(get_opkg_line)"
+  printf "${CYAN}Время работы:    %s${NC}\n" "$(get_uptime_line)"
+  printf "${CYAN}Версия:          %s by rndnaame${NC}\n\n" "$SCRIPT_VERSION"
   echo "1. AWG Manager"
   echo "2. NFQWS"
   echo "3. Бэкап Entware"
@@ -367,7 +367,6 @@ main_menu() {
       00|0) exit 0 ;;
       *) echo "Неверный выбор. Попробуйте снова." ;;
     esac
-    # После возврата из подменю сразу показываем главное меню (как в оригинальном KeenKit)
   done
 }
 
