@@ -10,6 +10,8 @@ REPO="keen-extras"
 SCRIPT="keenextras.sh"
 BRANCH="main"
 SCRIPT_VERSION="1.5"
+DATE=$(date +%Y-%m-%d_%H-%M)
+OPT_DIR="/opt"
 
 print_message() {
   local message="$1"
@@ -18,7 +20,7 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== BACKUP HELPERS (точно как в KeenKit) ======================
+# ====================== BACKUP HELPERS (ТОЧНО КАК В KEENKIT) ======================
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch
@@ -34,17 +36,11 @@ get_architecture() {
 }
 
 get_internal_storage_size() {
-  local flag="$1"
-  local ls_json
-  ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
+  local ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
   local free total
   free=$(echo "$ls_json" | grep -o '"free":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
   total=$(echo "$ls_json" | grep -o '"total":[0-9]*' | head -1 | grep -o '[0-9]*' || echo 0)
-  if [ "$flag" = "free" ]; then
-    echo $((free / 1024 / 1024))
-  else
-    format_size $((total - free)) $total
-  fi
+  echo $((free / 1024 / 1024))
 }
 
 format_size() {
@@ -53,12 +49,7 @@ format_size() {
   local total_mb=$((total / 1024 / 1024))
   if [ "$total_mb" -ge 1024 ]; then
     local total_gb=$((total_mb / 1024))
-    if [ "$used_mb" -lt 1024 ]; then
-      printf "%d MB / %d GB" $used_mb $total_gb
-    else
-      local used_gb=$((used_mb / 1024))
-      printf "%d / %d GB" $used_gb $total_gb
-    fi
+    [ "$used_mb" -lt 1024 ] && printf "%d MB / %d GB" $used_mb $total_gb || printf "%d / %d GB" $((used_mb / 1024)) $total_gb
   else
     printf "%d / %d MB" $used_mb $total_mb
   fi
@@ -69,13 +60,11 @@ select_drive_reset_partition() { in_partition=0; uuid=""; label=""; fstype=""; t
 select_drive_reset_media() { media_found=1; media_is_usb=0; current_manufacturer=""; select_drive_reset_partition; }
 
 select_drive_add_partition() {
-  local used_bytes display_name fstype_upper
-  if [ -z "$uuid" ] || [ -z "$fstype" ] || [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
-    select_drive_reset_partition; return; fi
+  [ -z "$uuid" ] || [ -z "$fstype" ] || [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ] && { select_drive_reset_partition; return; }
   echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
   echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
   used_bytes=$((total_bytes - free_bytes)); [ "$used_bytes" -lt 0 ] && used_bytes=0
-  if [ -n "$label" ]; then display_name="$label"; elif [ -n "$current_manufacturer" ]; then display_name="$current_manufacturer"; else display_name="Unknown"; fi
+  display_name=${label:-${current_manufacturer:-Unknown}}
   fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
   echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
   uuids="${uuids:+$uuids
@@ -159,7 +148,7 @@ packages_checker() {
   [ -n "$missing" ] && { print_message "Устанавливаем:$missing" "$GREEN"; opkg update >/dev/null 2>&1; opkg install $missing; echo ""; }
 }
 
-# ====================== БЭКАП ENTWARE (полностью как в KeenKit) ======================
+# ====================== БЭКАП ENTWARE (ТОЧНО КАК В ОРИГИНАЛЕ KEENKIT) ======================
 backup_entware() {
   packages_checker "tar libacl"
   select_drive "Выберите накопитель:"
@@ -180,8 +169,9 @@ backup_entware() {
   exit_function
 }
 
-# ====================== AWG & NFQWS ======================
+# ====================== AWG MANAGER ======================
 install_awg_last() { print_message "Установка AWG Manager (последняя версия)..." "$GREEN"; curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh; }
+
 install_awg_version() {
   print_message "Установка выбранной версии AWG Manager..." "$CYAN"
   opkg install curl ca-certificates wget-ssl 2>/dev/null || true
@@ -198,13 +188,16 @@ install_awg_version() {
   opkg install --force-downgrade "awg-manager_${ver}_${S}.ipk" && print_message "🎉 AWG Manager v$ver успешно установлен!" "$GREEN" || print_message "⚠️ Ошибка установки" "$RED"
   rm -f "awg-manager_${ver}_${S}.ipk" 2>/dev/null
 }
+
 remove_awg() { print_message "Удаление AWG Manager..." "$RED"; opkg remove --autoremove awg-manager 2>/dev/null || true; rm -rf /opt/etc/awg-manager /opt/etc/opkg/awg_manager.conf; print_message "AWG Manager полностью удалён" "$GREEN"; }
 
+# ====================== NFQWS ======================
 install_nfqws() { print_message "Установка NFQWS..." "$GREEN"; mkdir -p /opt/etc/opkg; echo "src/gz nfqws-keenetic https://nfqws.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf; opkg update >/dev/null 2>&1; opkg install nfqws-keenetic; }
 install_nfqws2() { print_message "Установка NFQWS2..." "$GREEN"; mkdir -p /opt/etc/opkg; echo "src/gz nfqws2-keenetic https://nfqws.github.io/nfqws2-keenetic/all" > /opt/etc/opkg/nfqws2-keenetic.conf; opkg update >/dev/null 2>&1; opkg install nfqws2-keenetic; }
 install_nfqws_web() { print_message "Установка веб-интерфейса NFQWS..." "$GREEN"; opkg install ca-certificates wget-ssl 2>/dev/null || true; opkg remove wget-nossl 2>/dev/null || true; mkdir -p /opt/etc/opkg; echo "src/gz nfqws-keenetic-web https://nfqws.github.io/nfqws-keenetic-web/all" > /opt/etc/opkg/nfqws-keenetic-web.conf; opkg update >/dev/null 2>&1; opkg install nfqws-keenetic-web && print_message "🎉 Веб-интерфейс NFQWS успешно установлен!" "$GREEN" || print_message "⚠️ Ошибка установки" "$RED"; }
 remove_nfqws() { print_message "Удаление всех компонентов NFQWS..." "$RED"; opkg remove --autoremove nfqws-keenetic nfqws2-keenetic nfqws-keenetic-web 2>/dev/null || true; rm -f /opt/etc/opkg/nfqws-*.conf; print_message "NFQWS полностью удалён" "$GREEN"; }
 
+# ====================== ОБНОВЛЕНИЕ ======================
 update_menu() {
   print_message "Обновление KeenExtras..." "$CYAN"
   curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || { print_message "❌ Не удалось скачать обновление" "$RED"; return 1; }
@@ -278,5 +271,3 @@ main_menu() {
 }
 
 main_menu
-EOF
-chmod +x /opt/keenextras.sh && /opt/keenextras.sh
