@@ -1,5 +1,6 @@
 #!/bin/sh
-REPO="keen-extras"          # ← поменяй на имя своего репозитория, если другое
+USERNAME="rndnaame"         # ← твой GitHub-никнейм
+REPO="keen-extras"
 SCRIPT="keenextras.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
@@ -29,11 +30,11 @@ packages_checker() {
 
 packages_checker curl tar findutils jq
 
-curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
 
-cd $OPT_DIR/bin
+cd $OPT_DIR/bin 2>/dev/null || mkdir -p $OPT_DIR/bin
 ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenextras
 
 print_message "Установка завершена! Запуск: keenextras" "\033[1;32m"
