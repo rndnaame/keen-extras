@@ -34,6 +34,27 @@ EOF
 }
 
 # ====================== ФУНКЦИИ ИЗ ОРИГИНАЛЬНОГО KEENKIT ======================
+get_version_info() {
+  if [ -z "$VERSION_INFO" ]; then
+    VERSION_INFO=$(rci_request "show/version" 2>/dev/null)
+  fi
+  echo "$VERSION_INFO"
+}
+
+get_system_info() {
+  if [ -z "$SYSTEM_INFO" ]; then
+    SYSTEM_INFO=$(rci_request "show/system" 2>/dev/null)
+  fi
+  echo "$SYSTEM_INFO"
+}
+
+get_interface_info() {
+  if [ -z "$INTERFACE_INFO" ]; then
+    INTERFACE_INFO=$(rci_request "show/interface" 2>/dev/null)
+  fi
+  echo "$INTERFACE_INFO"
+}
+
 get_architecture() {
   if [ -z "$ARCHITECTURE" ]; then
     local arch
@@ -46,10 +67,6 @@ get_architecture() {
     esac
   fi
   echo "$ARCHITECTURE"
-}
-
-get_version_info() {
-  rci_request 'show version' 2>/dev/null || echo ""
 }
 
 get_device() {
@@ -69,31 +86,130 @@ get_boot_current() {
 }
 
 get_cpu_model() {
-  cat /tmp/sysinfo/soc 2>/dev/null || grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown"
+  cpu_list="MT76[0-9A-Za-z]* MT79[0-9A-Za-z]* EN75[0-9A-Za-z]*"
+  for pattern in $cpu_list; do
+    found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
+    if [ -n "$found" ]; then
+      echo "$found"
+      return
+    fi
+  done
+  echo "Unknown"
+}
+
+get_radio_temp() {
+  get_interface_info | awk -v iface="$1" '
+    !in_iface {
+      pos = index($0, "\"" iface "\"")
+      if (pos) { in_iface=1; $0=substr($0,pos) }
+    }
+    in_iface && match($0, /"temperature": *[0-9]+/) {
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+    in_iface && /}/ { in_iface=0 }
+  ' | grep -o '[0-9]*' | head -n1
 }
 
 get_temperatures() {
-  local temp=$(rci_request 'show temperature' 2>/dev/null)
-  local wifi=$(echo "$temp" | grep -o 'wifi:[0-9]*' | cut -d: -f2 || echo "N/A")
-  local cpu=$(echo "$temp" | grep -o 'cpu:[0-9]*' | cut -d: -f2 || echo "N/A")
-  echo " | Wi-Fi: ${wifi}°C | CPU: ${cpu}°C"
+  temp_2=$(get_radio_temp WifiMaster0)
+  temp_5=$(get_radio_temp WifiMaster1)
+  arch=$(get_architecture)
+  cpu_str=""
+  wifi_str=""
+
+  if [ "$arch" = "aarch64" ]; then
+    temp_cpu_raw=$(cat /sys/devices/virtual/thermal/thermal_zone0/temp 2>/dev/null | tr -d -c '0-9')
+    [ -n "$temp_cpu_raw" ] && cpu_str="CPU: $((temp_cpu_raw / 1000))°C"
+  fi
+
+  if ! echo "$temp_2" | grep -qE '^[0-9]+$'; then
+    [ -n "$cpu_str" ] && echo " | $cpu_str"
+    return
+  fi
+
+  if echo "$temp_5" | grep -qE '^[0-9]+$'; then
+    diff=$((temp_5 - temp_2))
+    [ $diff -lt 0 ] && diff=$((-diff))
+    if [ $diff -lt 3 ]; then
+      wifi_str="Wi-Fi: ${temp_5}°C"
+    else
+      wifi_str="2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C"
+    fi
+  else
+    wifi_str="2.4GHz: ${temp_2}°C"
+  fi
+
+  [ -n "$cpu_str" ] && wifi_str="$wifi_str | $cpu_str"
+  echo " | $wifi_str"
 }
 
-get_modem() { :; }          # заглушка
-get_mws_members() { :; }    # заглушка
-
 get_ram_usage() {
-  free -m 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " MB"}' || echo "0 / 0 MB"
+  local memory=$(get_system_info | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
+  local used=$(echo "$memory" | cut -d'/' -f1)
+  local total=$(echo "$memory" | cut -d'/' -f2)
+  printf "%d / %d MB" "$((used / 1024))" "$((total / 1024))"
 }
 
 get_opkg_storage() {
-  df -m /opt 2>/dev/null | tail -1 | awk '{print $3 " / " $2 " MB"}' || echo "0 / 0 MB"
+  local opkg_label
+  local ls_json
+  opkg_label=$(rci_request "show/sc/opkg/disk" 2>/dev/null | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  ls_json=$(rci_request "ls" 2>/dev/null)
+
+  free=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"free":' | head -1 | grep -o '[0-9]\+')
+  total=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+
+  if [ -n "$free" ] && [ -n "$total" ]; then
+    used=$((total - free))
+    echo "$(format_size $used $total)"
+    return
+  fi
+  echo "0 / 0 MB"
 }
 
 get_uptime() {
-  uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//' || echo "Unknown"
+  local uptime=$(get_system_info | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+  format_uptime_seconds "$uptime"
 }
 
+format_uptime_seconds() {
+  local uptime=$1
+  if [ -z "$uptime" ] || ! echo "$uptime" | grep -qE '^[0-9]+$'; then
+    echo "Unknown"
+    return
+  fi
+  local days=$((uptime / 86400))
+  local hours=$(((uptime % 86400) / 3600))
+  local minutes=$(((uptime % 3600) / 60))
+  local seconds=$((uptime % 60))
+
+  if [ "$days" -gt 0 ]; then
+    printf "%d дн. %02d:%02d:%02d" "$days" "$hours" "$minutes" "$seconds"
+  else
+    printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds"
+  fi
+}
+
+format_size() {
+  local used=$1 total=$2
+  local used_mb=$((used / 1024 / 1024))
+  local total_mb=$((total / 1024 / 1024))
+  if [ "$total_mb" -ge 1024 ]; then
+    local total_gb=$((total_mb / 1024))
+    if [ "$used_mb" -lt 1024 ]; then
+      printf "%d MB / %d GB" $used_mb $total_gb
+    else
+      local used_gb=$((used_mb / 1024))
+      printf "%d / %d GB" $used_gb $total_gb
+    fi
+  else
+    printf "%d / %d MB" $used_mb $total_mb
+  fi
+}
+
+get_modem() { :; }
+get_mws_members() { :; }
 check_update() { :; }
 
 # ====================== BACKUP ENTWARE ======================
@@ -103,10 +219,10 @@ get_internal_storage_size() {
   echo $((free / 1024 / 1024))
 }
 
-# (остальные функции backup — select_drive, spinner и т.д. — оставлены без изменений, они уже работали)
+# (все остальные функции backup — select_drive, spinner, exit_function, packages_checker и backup_entware — оставлены как в предыдущей версии)
 
-# ====================== AWG, NFQWS, UPDATE (без изменений) ======================
-# (все функции install_awg_last, install_awg_version, remove_awg, install_nfqws и т.д. — как раньше)
+# ====================== AWG + NFQWS + UPDATE ======================
+# (все функции install_awg_last, install_awg_version и т.д. — без изменений)
 
 install_awg_last() { 
   print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
