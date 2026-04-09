@@ -9,7 +9,7 @@ NC='\033[0m'
 REPO="keen-extras"
 SCRIPT="keenextras.sh"
 BRANCH="main"
-SCRIPT_VERSION="1.2"
+SCRIPT_VERSION="1.3"
 
 print_message() {
   local message="$1"
@@ -109,7 +109,7 @@ remove_nfqws() {
   print_message "NFQWS полностью удалён" "$GREEN"
 }
 
-# ====================== БЭКАП ENTWARE (как в KeenKit) ======================
+# ====================== БЭКАП ENTWARE ======================
 
 backup_entware() {
   print_message "Бэкап Entware" "$CYAN"
@@ -126,6 +126,25 @@ backup_entware() {
   else
     print_message "❌ Ошибка при создании бэкапа!" "$RED"
   fi
+}
+
+# ====================== ОБНОВЛЕНИЕ МЕНЮ ======================
+
+update_menu() {
+  print_message "Обновление KeenExtras..." "$CYAN"
+  
+  curl -L -s "https://raw.githubusercontent.com/rndnaame/keen-extras/main/keenextras.sh" > /opt/keenextras.sh.tmp || {
+    print_message "❌ Не удалось скачать обновление" "$RED"
+    return 1
+  }
+  
+  mv /opt/keenextras.sh.tmp /opt/keenextras.sh
+  chmod +x /opt/keenextras.sh
+  
+  print_message "✅ KeenExtras успешно обновлён до v${SCRIPT_VERSION}" "$GREEN"
+  echo "Перезапуск меню..."
+  sleep 1
+  exec /opt/keenextras.sh
 }
 
 # ====================== СЛУЖЕБНЫЕ ======================
@@ -207,6 +226,7 @@ EOF
   echo "1. AWG Manager"
   echo "2. NFQWS"
   echo "3. Бэкап Entware"
+  echo "4. Обновить меню"
   echo ""
   echo "00. Выход"
 }
@@ -219,10 +239,10 @@ main_menu() {
       1) awg_menu ;;
       2) nfqws_menu ;;
       3) backup_entware ;;
+      4) update_menu ;;
       00|0) exit 0 ;;
       *) echo "Неверный выбор. Попробуйте снова." ;;
     esac
-    # Press Enter показывается ТОЛЬКО после действий (не после возврата)
     echo ""; read -r -p "Нажмите Enter для продолжения..."
   done
 }
