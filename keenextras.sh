@@ -20,7 +20,7 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-# ====================== НОВЫЙ КОМПАКТНЫЙ ЛОГО (только в подменю) ======================
+# ====================== ЛОГО (только в подменю) ======================
 print_logo() {
   cat <<'EOF'
    _  __                  _____           _           
@@ -29,6 +29,7 @@ print_logo() {
   | . \  __/  __/ | | | | |___ >  <| |_) | |  __/ (_| |
   |_|\_\___|\___|_| |_| |_____/_/\_\ .__/|_|\___|\__,_|
                                     |_|                  
+          KeenExtras
 EOF
 }
 
@@ -40,7 +41,7 @@ get_model() {
 }
 
 get_cpu_line() {
-  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || echo "Unknown")
+  local soc=$(cat /tmp/sysinfo/soc 2>/dev/null || grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^[ ]*//' || echo "Unknown")
   local arch=$(opkg print-architecture 2>/dev/null | grep -oE 'aarch64|mipsel|mips' | head -n1 || echo "unknown")
   echo "${soc} (${arch})"
 }
@@ -63,7 +64,7 @@ get_opkg_line() {
 }
 
 get_uptime_line() {
-  uptime | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//'
+  uptime 2>/dev/null | awk -F'up ' '{print $2}' | cut -d, -f1 | sed 's/^[ \t]*//;s/[ \t]*$//'
 }
 
 # ====================== BACKUP ENTWARE (полностью как в KeenKit) ======================
@@ -79,9 +80,6 @@ get_architecture() {
   fi
   echo "$ARCHITECTURE"
 }
-
-# (все остальные функции backup: select_drive, spinner, exit_function и т.д. — оставлены без изменений)
-# Для экономии места они полностью скопированы из предыдущей рабочей версии.
 
 get_internal_storage_size() {
   local ls_json=$(rci_request "ls" 2>/dev/null || echo '{"storage":{"free":0,"total":0}}')
@@ -212,7 +210,7 @@ backup_entware() {
   exit_function
 }
 
-# ====================== AWG + NFQWS + UPDATE (без изменений) ======================
+# ====================== AWG + NFQWS + UPDATE ======================
 install_awg_last() { 
   print_message "Установка AWG Manager (последняя версия)..." "$GREEN"
   curl -sL https://raw.githubusercontent.com/hoaxisr/awg-manager/main/scripts/install.sh | sh
